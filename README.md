@@ -337,7 +337,7 @@ curl -X PUT http://localhost:3000/api/dev/simulation \
 
 ## 14. 复用来源
 
-- **脚手架**：没有使用模板仓库，项目结构手工创建。依赖见 `frontend/package.json`（含 `package-lock.json`）和 `backend/pom.xml`，版本由 Spring Boot 父 POM 和锁文件固定。
+- **脚手架**：没有使用模板仓库，项目结构由人工结合ai创建。依赖见 `frontend/package.json`（含 `package-lock.json`）和 `backend/pom.xml`，版本由 Spring Boot 父 POM 和锁文件固定。
 - **开源代码**：除上述依赖外，没有复制第三方代码。
 - **图片素材**：模板封面和 `samples/` 中的示例图由 `scripts/generate_demo_assets.py` 绘制，不含第三方素材。
 - **界面**：参考题目提供的截图布局，未使用其中的图片和品牌。
