@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xiaoying.studio.task.TaskMapper">
+
+    <sql id="taskColumns">
+        t.id, t.user_id, t.template_id, tpl.title AS template_title, tpl.cover_url AS template_cover_url,
+        t.status, t.current_stage, t.failure_stage, t.failure_reason, t.result_path,
+        t.sim_asset_check_ms, t.sim_generate_ms, t.sim_result_ms, t.sim_fail_stage,
+        t.created_at, t.updated_at, t.started_at, t.finished_at
+    </sql>
+
+    <insert id="insert">
+        INSERT INTO task (id, user_id, template_id, status, sim_asset_check_ms, sim_generate_ms, sim_result_ms,
+                          sim_fail_stage, created_at, updated_at)
+        VALUES (#{id}, #{userId}, #{templateId}, #{status}, #{simAssetCheckMs}, #{simGenerateMs}, #{simResultMs},
+                #{simFailStage}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <insert id="insertTaskAsset">
+        INSERT INTO task_asset (task_id, sort_index, asset_id) VALUES (#{taskId}, #{sortIndex}, #{assetId})
+    </insert>
+
+    <select id="findById" resultType="com.xiaoying.studio.task.Task">
+        SELECT <include refid="taskColumns"/>
+        FROM task t JOIN template tpl ON tpl.id = t.template_id
+        WHERE t.id = #{id}
+    </select>
+
+    <select id="findOwned" resultType="com.xiaoying.studio.task.Task">
+        SELECT <include refid="taskColumns"/>
+        FROM task t JOIN template tpl ON tpl.id = t.template_id
+        WHERE t.id = #{id} AND t.user_id = #{userId}
+    </select>
+
+    <select id="findOwnedByIds" resultType="com.xiaoying.studio.task.Task">
+        SELECT <include refid="taskColumns"/>
+        FROM task t JOIN template tpl ON tpl.id = t.template_id
+        WHERE t.user_id = #{userId} AND t.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+
+    <select id="findByUser" resultType="com.xiaoying.studio.task.Task">
+        SELECT <include refid="taskColumns"/>
+        FROM task t JOIN template tpl ON tpl.id = t.template_id
+        WHERE t.user_id = #{userId}
+        <if test="templateId != null and templateId != ''">AND t.template_id = #{templateId}</if>
+        ORDER BY t.created_at DESC, t.id
+        LIMIT #{limit}
+    </select>
+
+    <select id="findPendingIds" resultType="string">
+        SELECT id FROM task WHERE status = 'PENDING' ORDER BY created_at, id LIMIT #{limit}
+    </select>
+
+    <update id="claim">
+        UPDATE task SET status = 'PROCESSING', started_at = #{now}, updated_at = #{now}
+        WHERE id = #{id} AND status = 'PENDING'
+    </update>
+
+    <update id="updateStage">
+        UPDATE task SET current_stage = #{stage}, updated_at = #{now}
+        WHERE id = #{id} AND status = 'PROCESSING'
+    </update>
+
+    <update id="markSucceeded">
+        UPDATE task
+        SET status = 'SUCCEEDED', current_stage = NULL, result_path = #{resultPath},
+            finished_at = #{now}, updated_at = #{now}
+        WHERE id = #{id} AND status = 'PROCESSING'
+    </update>
+
+    <update id="markFailed">
+        UPDATE task
+        SET status = 'FAILED', current_stage = NULL, failure_stage = #{stage}, failure_reason = #{reason},
+            finished_at = #{now}, updated_at = #{now}
+        WHERE id = #{id} AND status = 'PROCESSING'
+    </update>
+
+    <update id="failInterrupted">
+        UPDATE task
+        SET status = 'FAILED', failure_stage = current_stage, current_stage = NULL, failure_reason = #{reason},
+            finished_at = #{now}, updated_at = #{now}
+        WHERE status = 'PROCESSING'
+    </update>
+
+    <insert id="insertStageRun">
+        INSERT INTO task_stage_run (task_id, stage, status, started_at)
+        VALUES (#{taskId}, #{stage}, 'RUNNING', #{now})
+    </insert>
+
+    <update id="finishStageRun">
+        UPDATE task_stage_run SET status = #{status}, message = #{message}, finished_at = #{now}
+        WHERE task_id = #{taskId} AND stage = #{stage}
+    </update>
+
+    <select id="findStageRuns" resultType="com.xiaoying.studio.task.TaskStageRun">
+        SELECT stage, status, message, started_at, finished_at
+        FROM task_stage_run WHERE task_id = #{taskId} ORDER BY started_at, stage
+    </select>
+</mapper>

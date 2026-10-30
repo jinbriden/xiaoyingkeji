@@ -1,0 +1,53 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: studio-backend
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/studio?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:studio}
+    password: ${DB_PASSWORD:studio_dev_password}
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+      schema-locations: classpath:db/schema.sql
+      data-locations: classpath:db/data.sql
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+app:
+  storage:
+    root: ${STORAGE_ROOT:./data/storage}
+  auth:
+    cookie-name: studio_session
+    cookie-secure: ${COOKIE_SECURE:false}
+    session-ttl: ${SESSION_TTL:P7D}
+  task:
+    dispatcher-enabled: true
+    # 同时执行的任务数，超出的任务在 MySQL 中保持“等待处理”
+    worker-threads: ${TASK_WORKER_THREADS:2}
+    dispatch-interval-ms: ${TASK_DISPATCH_INTERVAL_MS:500}
+  simulation:
+    asset-check-delay-ms: ${SIM_ASSET_CHECK_DELAY_MS:2000}
+    generate-delay-ms: ${SIM_GENERATE_DELAY_MS:6000}
+    result-delay-ms: ${SIM_RESULT_DELAY_MS:2000}
+    # 可选值：ASSET_CHECK / GENERATE / RESULT，留空表示不注入失败
+    fail-stage: ${SIM_FAIL_STAGE:}
+  dev-api:
+    # 控制 /api/dev/** 是否开放，线上环境保持 false
+    enabled: ${DEV_API_ENABLED:false}
