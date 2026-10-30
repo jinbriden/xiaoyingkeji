@@ -1,0 +1,59 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: studio
+      MYSQL_USER: ${DB_USERNAME:-studio}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-studio_dev_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-studio_dev_root_password}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/studio?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: ${DB_USERNAME:-studio}
+      DB_PASSWORD: ${DB_PASSWORD:-studio_dev_password}
+      TASK_WORKER_THREADS: ${TASK_WORKER_THREADS:-2}
+      SIM_ASSET_CHECK_DELAY_MS: ${SIM_ASSET_CHECK_DELAY_MS:-2000}
+      SIM_GENERATE_DELAY_MS: ${SIM_GENERATE_DELAY_MS:-6000}
+      SIM_RESULT_DELAY_MS: ${SIM_RESULT_DELAY_MS:-2000}
+      SIM_FAIL_STAGE: ${SIM_FAIL_STAGE:-}
+      # 本 Compose 用于演示，开放开发接口以便调整耗时和指定失败阶段
+      DEV_API_ENABLED: ${DEV_API_ENABLED:-true}
+    volumes:
+      - storage-data:/data/storage
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:8080
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  storage-data:

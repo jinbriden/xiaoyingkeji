@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 public class AuthService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final int MAX_PASSWORD_BYTES = 72;
 
     private final AuthMapper authMapper;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
@@ -43,6 +44,10 @@ public class AuthService {
     }
 
     public AppUser register(String email, String password) {
+        // BCrypt 按字节限制长度，接口层的 @Size 按字符计算，中文密码可能超限
+        if (password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
+            throw ApiException.badRequest("PASSWORD_TOO_LONG", "密码过长");
+        }
         AppUser user = new AppUser();
         user.setId(UUID.randomUUID().toString());
         user.setEmail(normalizeEmail(email));
@@ -58,7 +63,8 @@ public class AuthService {
 
     public AppUser login(String email, String password) {
         AppUser user = authMapper.findUserByEmail(normalizeEmail(email));
-        if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
+        if (user == null || password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES
+                || !passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "邮箱或密码不正确");
         }
         return user;
