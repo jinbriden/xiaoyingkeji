@@ -28,7 +28,7 @@ function isNewer(incoming: Task, existing: Task): boolean {
   if (isTerminal(existing.status)) {
     return false;
   }
-  return isTerminal(incoming.status) || incoming.updatedAt >= existing.updatedAt;
+  return isTerminal(incoming.status) || Date.parse(incoming.updatedAt) >= Date.parse(existing.updatedAt);
 }
 
 /**
@@ -199,7 +199,7 @@ export class TaskTracker {
       }
     }
     const sorted = [...tasks.values()].sort(
-      (a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id),
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id),
     );
     this.setState({ ...this.state, tasks: sorted });
   }

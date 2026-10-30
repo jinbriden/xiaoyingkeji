@@ -271,7 +271,7 @@ curl -X PUT http://localhost:3000/api/dev/simulation \
 | `docker compose up --build` | 本机通过（MySQL 8.4） |
 | 真实 MySQL 上的接口全流程 | 通过，含排队、失败注入、用户隔离、服务重启 |
 | 浏览器全流程 | 本机 Edge 无头模式通过，含查询异常、刷新恢复、390px 小屏 |
-| GitHub Actions | **未实际运行**：代码尚未推送，只在本地执行过相同命令 |
+| GitHub Actions | 通过，前端和后端两个任务均成功 |
 
 **已知限制**
 

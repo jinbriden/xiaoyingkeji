@@ -103,6 +103,33 @@ describe("TaskTracker", () => {
     });
   });
 
+  describe("时间比较", () => {
+    // 后端时间在毫秒为 0 时不带小数，例如 10:00:01Z，不能按字符串比较
+    it("同一秒内较晚的状态不会被当作旧数据丢弃", async () => {
+      listTasks.mockResolvedValue([task("a", { status: "PROCESSING", updatedAt: "2026-10-30T10:00:01Z" })]);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(0);
+
+      fetchTasks.mockResolvedValue([
+        task("a", { status: "PROCESSING", currentStage: "GENERATE", updatedAt: "2026-10-30T10:00:01.500Z" }),
+      ]);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(find("a")?.currentStage).toBe("GENERATE");
+    });
+
+    it("同一秒内提交的任务按实际时间倒序排列", async () => {
+      listTasks.mockResolvedValue([
+        task("early", { status: "SUCCEEDED", createdAt: "2026-10-30T10:00:01Z" }),
+        task("late", { status: "SUCCEEDED", createdAt: "2026-10-30T10:00:01.500Z" }),
+      ]);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(tracker.getSnapshot().tasks.map((item) => item.id)).toEqual(["late", "early"]);
+    });
+  });
+
   describe("查询异常与任务失败的区分", () => {
     it("查询失败时保留任务原状态，并单独记录查询错误", async () => {
       listTasks.mockResolvedValue([task("a", { status: "PROCESSING", currentStage: "GENERATE" })]);
