@@ -12,11 +12,11 @@ const TrackerContext = createContext<TaskTracker | null>(null);
  * 用户变化或退出登录时停止并清空，没有未结束任务时跟踪器自身不发请求。
  */
 export function TaskProvider({ children }: { children: ReactNode }) {
-  const { user, expire } = useAuth();
-  const expireRef = useRef(expire);
+  const { user, expire, identityVersion } = useAuth();
+  const expireRef = useRef(() => expire(identityVersion));
   useEffect(() => {
-    expireRef.current = expire;
-  }, [expire]);
+    expireRef.current = () => expire(identityVersion);
+  }, [expire, identityVersion]);
 
   const tracker = useMemo(() => new TaskTracker(api, { onUnauthorized: () => expireRef.current() }), []);
   const userId = user?.id ?? null;
@@ -28,7 +28,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       tracker.stop();
     }
     return () => tracker.stop();
-  }, [tracker, userId]);
+  }, [tracker, userId, identityVersion]);
 
   return <TrackerContext.Provider value={tracker}>{children}</TrackerContext.Provider>;
 }

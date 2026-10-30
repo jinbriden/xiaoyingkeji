@@ -27,13 +27,15 @@ public class TaskDispatcher {
 
     private final TaskMapper taskMapper;
     private final TaskRunner taskRunner;
+    private final TaskService taskService;
     private final ExecutorService workers;
     private final Semaphore idleWorkers;
 
-    public TaskDispatcher(TaskMapper taskMapper, TaskRunner taskRunner,
+    public TaskDispatcher(TaskMapper taskMapper, TaskRunner taskRunner, TaskService taskService,
                           @Value("${app.task.worker-threads}") int workerThreads) {
         this.taskMapper = taskMapper;
         this.taskRunner = taskRunner;
+        this.taskService = taskService;
         this.workers = Executors.newFixedThreadPool(workerThreads);
         this.idleWorkers = new Semaphore(workerThreads);
     }
@@ -41,7 +43,7 @@ public class TaskDispatcher {
     /** 在调度开始前执行，避免把本次启动刚领取的任务误判为遗留任务。 */
     @PostConstruct
     void failInterruptedTasks() {
-        int count = taskMapper.failInterrupted("服务重启，任务已中断，请重新提交", Instant.now());
+        int count = taskService.failInterruptedTasks();
         if (count > 0) {
             log.warn("Marked {} interrupted tasks as failed", count);
         }

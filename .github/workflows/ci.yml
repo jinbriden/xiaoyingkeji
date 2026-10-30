@@ -5,6 +5,13 @@ on:
   pull_request:
 
 jobs:
+  delivery-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Compose defaults and overrides
+        run: python3 scripts/test_delivery_config.py
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

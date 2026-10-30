@@ -22,7 +22,10 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/studio?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false
       DB_USERNAME: ${DB_USERNAME:-studio}
       DB_PASSWORD: ${DB_PASSWORD:-studio_dev_password}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_TTL: ${SESSION_TTL:-P7D}
       TASK_WORKER_THREADS: ${TASK_WORKER_THREADS:-2}
+      TASK_DISPATCH_INTERVAL_MS: ${TASK_DISPATCH_INTERVAL_MS:-500}
       SIM_ASSET_CHECK_DELAY_MS: ${SIM_ASSET_CHECK_DELAY_MS:-2000}
       SIM_GENERATE_DELAY_MS: ${SIM_GENERATE_DELAY_MS:-6000}
       SIM_RESULT_DELAY_MS: ${SIM_RESULT_DELAY_MS:-2000}

@@ -24,6 +24,8 @@ public interface TaskMapper {
     List<Task> findByUser(@Param("userId") String userId, @Param("templateId") String templateId,
                           @Param("limit") int limit);
 
+    List<Task> findActiveByUser(@Param("userId") String userId, @Param("templateId") String templateId);
+
     List<String> findPendingIds(int limit);
 
     /** 把任务从等待处理改为处理中，返回 1 表示抢占成功。 */
@@ -38,6 +40,8 @@ public interface TaskMapper {
 
     /** 服务启动时调用：上次运行遗留的处理中任务已无线程执行，统一置为失败。 */
     int failInterrupted(@Param("reason") String reason, @Param("now") Instant now);
+
+    int failInterruptedStageRuns(@Param("reason") String reason, @Param("now") Instant now);
 
     void insertStageRun(@Param("taskId") String taskId, @Param("stage") StageName stage, @Param("now") Instant now);
 

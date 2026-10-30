@@ -48,6 +48,7 @@ export class TaskTracker {
   private controller: AbortController | null = null;
   private polling = false;
   private failures = 0;
+  private needsRecovery = false;
 
   constructor(
     private readonly taskApi: TaskApi,
@@ -83,6 +84,7 @@ export class TaskTracker {
     this.userId = null;
     this.cancelPolling();
     this.failures = 0;
+    this.needsRecovery = false;
     this.setState(IDLE_STATE);
   }
 
@@ -90,6 +92,19 @@ export class TaskTracker {
   add(task: Task): void {
     this.merge([task]);
     this.schedule();
+  }
+
+  /** 在提交时捕获会话；站内卸载不影响受理，退出/切换（含 A→B→A）使回调失效。 */
+  captureSubmission(): (task: Task) => boolean {
+    const session = this.session;
+    const userId = this.userId;
+    return (task) => {
+      if (userId === null || session !== this.session) {
+        return false;
+      }
+      this.add(task);
+      return true;
+    };
   }
 
   /** 手动刷新，也用于从查询异常中恢复。 */
@@ -101,25 +116,38 @@ export class TaskTracker {
   }
 
   private async reload(): Promise<void> {
+    if (this.userId === null) return;
     const session = this.session;
-    this.setState({ ...this.state, loading: true });
     const controller = new AbortController();
     this.controller = controller;
+    this.polling = true;
+    this.needsRecovery = true;
+    this.setState({ ...this.state, loading: true });
     try {
       const tasks = await this.taskApi.listTasks(controller.signal);
-      if (session !== this.session) {
+      if (!this.isCurrent(session, controller)) {
         return;
       }
       this.merge(tasks);
+      this.needsRecovery = false;
+      this.failures = 0;
       this.setState({ ...this.state, loading: false, queryError: null });
     } catch (error) {
-      if (session !== this.session) {
+      if (!this.isCurrent(session, controller)) {
         return;
       }
       this.setState({ ...this.state, loading: false });
       this.handleFailure(error);
     }
+    if (!this.isCurrent(session, controller)) return;
+    this.controller = null;
+    this.polling = false;
     this.schedule();
+  }
+
+  /** session 区分用户身份，controller 区分同一身份下的多次刷新。 */
+  private isCurrent(session: number, controller: AbortController): boolean {
+    return session === this.session && this.controller === controller && !controller.signal.aborted;
   }
 
   private activeIds(): string[] {
@@ -130,12 +158,12 @@ export class TaskTracker {
     if (this.timer !== null || this.polling || this.state.paused || this.userId === null) {
       return;
     }
-    if (this.activeIds().length === 0) {
+    if (!this.needsRecovery && this.activeIds().length === 0) {
       return;
     }
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.poll();
+      void (this.needsRecovery ? this.reload() : this.poll());
     }, this.intervalMs);
   }
 
@@ -148,26 +176,32 @@ export class TaskTracker {
     this.polling = true;
     const controller = new AbortController();
     this.controller = controller;
-    try {
-      const tasks = await this.taskApi.fetchTasks(ids, controller.signal);
-      if (session !== this.session) {
-        return;
-      }
-      this.failures = 0;
-      const returned = new Set(tasks.map((task) => task.id));
-      this.merge(tasks, ids.filter((id) => !returned.has(id)));
-      this.setState({ ...this.state, queryError: null });
-    } catch (error) {
-      if (session !== this.session) {
-        return;
-      }
-      this.handleFailure(error);
-    } finally {
-      if (session === this.session) {
-        this.polling = false;
-        this.schedule();
-      }
+    let failed = false;
+    const batches: string[][] = [];
+    for (let offset = 0; offset < ids.length; offset += 100) {
+      batches.push(ids.slice(offset, offset + 100));
     }
+    await Promise.all(batches.map(async (batch) => {
+      try {
+        const tasks = await this.taskApi.fetchTasks(batch, controller.signal);
+        if (!this.isCurrent(session, controller)) return;
+        const returned = new Set(tasks.map((task) => task.id));
+        this.merge(tasks, batch.filter((id) => !returned.has(id)));
+      } catch (error) {
+        if (!this.isCurrent(session, controller)) return;
+        // 一轮轮询只记一次失败，不按批次累计；成功的批次仍会合并
+        if (!failed || (error instanceof ApiError && error.status === 401)) this.handleFailure(error);
+        failed = true;
+      }
+    }));
+    if (!this.isCurrent(session, controller)) return;
+    if (!failed) {
+      this.failures = 0;
+      this.setState({ ...this.state, queryError: null });
+    }
+    this.controller = null;
+    this.polling = false;
+    this.schedule();
   }
 
   private handleFailure(error: unknown): void {

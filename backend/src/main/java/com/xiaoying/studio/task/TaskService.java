@@ -1,6 +1,8 @@
 package com.xiaoying.studio.task;
 
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** 任务受理和查询。这里只读写记录，阶段推进全部由 {@link TaskRunner} 完成。 */
 @Service
 public class TaskService {
+
+    private static final int HISTORY_LIMIT = 100;
 
     private final TaskMapper taskMapper;
     private final AssetMapper assetMapper;
@@ -60,6 +64,26 @@ public class TaskService {
             taskMapper.insertTaskAsset(task.getId(), i, assetIds.get(i));
         }
         return taskMapper.findById(task.getId());
+    }
+
+    /** 最新 100 条记录之外，始终保留全部未结束任务，供刷新后恢复跟踪。 */
+    @Transactional(readOnly = true)
+    public List<Task> list(String userId, String templateId) {
+        Map<String, Task> tasks = new HashMap<>();
+        taskMapper.findByUser(userId, templateId, HISTORY_LIMIT).forEach(task -> tasks.put(task.getId(), task));
+        taskMapper.findActiveByUser(userId, templateId).forEach(task -> tasks.put(task.getId(), task));
+        return tasks.values().stream()
+                .sorted(Comparator.comparing(Task::getCreatedAt).reversed().thenComparing(Task::getId))
+                .toList();
+    }
+
+    /** 启动调度前清理遗留任务；先关闭阶段，此时父任务仍为 PROCESSING。 */
+    @Transactional
+    public int failInterruptedTasks() {
+        Instant now = Instant.now();
+        String reason = "服务重启，任务已中断，请重新提交";
+        taskMapper.failInterruptedStageRuns(reason, now);
+        return taskMapper.failInterrupted(reason, now);
     }
 
     public Task getOwned(String userId, String taskId) {

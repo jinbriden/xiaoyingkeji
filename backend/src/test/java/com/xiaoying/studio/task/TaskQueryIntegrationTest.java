@@ -135,6 +135,21 @@ class TaskQueryIntegrationTest {
     }
 
     @Test
+    void missingUploadTemplateIdIsInvalidArgument() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", ApiTestSupport.png());
+        mvc.perform(multipart("/api/assets").file(file).cookie(session))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+    }
+
+    @Test
+    void missingBatchIdsIsInvalidArgument() throws Exception {
+        mvc.perform(get("/api/tasks/batch").cookie(session))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+    }
+
+    @Test
     void rejectsFileWhoseContentIsNotAnImage() throws Exception {
         MockMultipartFile fake = new MockMultipartFile("file", "fake.png", "image/png", "not an image".getBytes());
         mvc.perform(multipart("/api/assets").file(fake).param("templateId", "demo-poster").cookie(session))

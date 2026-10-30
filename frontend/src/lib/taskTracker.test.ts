@@ -53,6 +53,44 @@ describe("TaskTracker", () => {
   });
 
   describe("多任务互不串扰", () => {
+    it("splits all active IDs into batches of at most 100", async () => {
+      const tasks = Array.from({ length: 205 }, (_, index) => task(`task-${index}`));
+      listTasks.mockResolvedValue(tasks);
+      fetchTasks.mockImplementation(async (ids) => ids.map((id) => task(id, { status: "SUCCEEDED" })));
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fetchTasks.mock.calls.map(([ids]) => ids.length)).toEqual([100, 100, 5]);
+      const requested = fetchTasks.mock.calls.flatMap(([ids]) => ids);
+      expect([...requested].sort()).toEqual(tasks.map(({ id }) => id).sort());
+      expect(new Set(requested).size).toBe(tasks.length);
+      expect(tracker.getSnapshot().tasks.every(({ status }) => status === "SUCCEEDED")).toBe(true);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fetchTasks).toHaveBeenCalledTimes(3);
+    });
+
+    it("merges each successful batch independently while another fails or remains pending", async () => {
+      listTasks.mockResolvedValue(Array.from({ length: 205 }, (_, index) => task(`task-${index}`)));
+      const pending = deferred<Task[]>();
+      fetchTasks.mockRejectedValueOnce(new ApiError(503, "UNAVAILABLE", "batch unavailable"))
+        .mockImplementationOnce(async (ids) => ids.slice(1).map((id) => task(id, { status: "SUCCEEDED" })))
+        .mockReturnValueOnce(pending.promise);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fetchTasks).toHaveBeenCalledTimes(3);
+      const [failed, successful, waiting] = fetchTasks.mock.calls.map(([ids]) => ids);
+      expect(failed.every((id) => find(id)?.status === "PENDING")).toBe(true);
+      expect(find(successful[0])).toBeUndefined();
+      expect(successful.slice(1).every((id) => find(id)?.status === "SUCCEEDED")).toBe(true);
+      expect(tracker.getSnapshot().queryError).toBe("batch unavailable");
+      expect(waiting.every((id) => find(id)?.status === "PENDING")).toBe(true);
+      pending.resolve(waiting.map((id) => task(id, { status: "SUCCEEDED" })));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(waiting.every((id) => find(id)?.status === "SUCCEEDED")).toBe(true);
+      expect(tracker.getSnapshot()).toMatchObject({ queryError: "batch unavailable", paused: false });
+    });
+
     it("每个任务独立保存状态、阶段、错误和结果", async () => {
       listTasks.mockResolvedValue([task("a"), task("bb"), task("ccc")]);
       tracker.start("user-1");
@@ -131,6 +169,40 @@ describe("TaskTracker", () => {
   });
 
   describe("查询异常与任务失败的区分", () => {
+    it("retries failed initial list recovery without any known active IDs", async () => {
+      listTasks.mockRejectedValueOnce(new ApiError(503, "UNAVAILABLE", "list unavailable"))
+        .mockResolvedValueOnce([task("recovered")]);
+      fetchTasks.mockResolvedValue([task("recovered", { status: "SUCCEEDED" })]);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tracker.getSnapshot()).toMatchObject({ tasks: [], queryError: "list unavailable", paused: false, loading: false });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(listTasks).toHaveBeenCalledTimes(2);
+      expect(tracker.getSnapshot().queryError).toBeNull();
+      expect(find("recovered")?.status).toBe("PENDING");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(find("recovered")?.status).toBe("SUCCEEDED");
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(listTasks).toHaveBeenCalledTimes(2);
+      expect(fetchTasks).toHaveBeenCalledOnce();
+    });
+
+    it("pauses list recovery after five failures and manual refresh resumes it", async () => {
+      tracker = new TaskTracker({ listTasks, fetchTasks }, { intervalMs: 1000 });
+      listTasks.mockRejectedValue(new ApiError(503, "UNAVAILABLE", "list unavailable"));
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(listTasks).toHaveBeenCalledTimes(5);
+      expect(tracker.getSnapshot()).toMatchObject({ tasks: [], paused: true, loading: false });
+      expect(fetchTasks).not.toHaveBeenCalled();
+      listTasks.mockResolvedValue([]);
+      await tracker.refresh();
+      expect(tracker.getSnapshot()).toMatchObject({ tasks: [], paused: false, loading: false, queryError: null });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(listTasks).toHaveBeenCalledTimes(6);
+      expect(fetchTasks).not.toHaveBeenCalled();
+    });
+
     it("查询失败时保留任务原状态，并单独记录查询错误", async () => {
       listTasks.mockResolvedValue([task("a", { status: "PROCESSING", currentStage: "GENERATE" })]);
       tracker.start("user-1");
@@ -195,6 +267,72 @@ describe("TaskTracker", () => {
   });
 
   describe("查询生命周期", () => {
+    it("does not start polling while list recovery is still in flight", async () => {
+      const pending = deferred<Task[]>();
+      listTasks.mockReturnValue(pending.promise);
+      tracker.start("user-1");
+      tracker.add(task("a"));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fetchTasks).not.toHaveBeenCalled();
+      pending.resolve([task("a")]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fetchTasks).toHaveBeenCalledOnce();
+    });
+
+    it.each(["success", "401", "network"])("ignores superseded same-session list %s including loading and errors", async (outcome) => {
+      const onUnauthorized = vi.fn();
+      tracker = new TaskTracker({ listTasks, fetchTasks }, { intervalMs: 1000, onUnauthorized });
+      const old = deferred<Task[]>();
+      const latest = deferred<Task[]>();
+      listTasks.mockResolvedValueOnce([task("a")]).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(0);
+      const oldRefresh = tracker.refresh();
+      const oldSignal = listTasks.mock.calls[1][0];
+      const latestRefresh = tracker.refresh();
+      expect(oldSignal?.aborted).toBe(true);
+      if (outcome === "success") old.resolve([task("a", { status: "SUCCEEDED" })]);
+      else old.reject(new ApiError(outcome === "401" ? 401 : 503, "OLD", "obsolete error"));
+      await oldRefresh;
+      expect(tracker.getSnapshot()).toMatchObject({ loading: true, queryError: null });
+      expect(find("a")?.status).toBe("PENDING");
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fetchTasks).not.toHaveBeenCalled();
+      latest.resolve([task("a", { status: "SUCCEEDED" })]);
+      await latestRefresh;
+      expect(tracker.getSnapshot().loading).toBe(false);
+    });
+
+    it.each(["success", "401", "network"])("superseded poll %s cannot mutate or finish a newer poll", async (outcome) => {
+      const onUnauthorized = vi.fn();
+      tracker = new TaskTracker({ listTasks, fetchTasks }, { intervalMs: 1000, onUnauthorized });
+      listTasks.mockResolvedValueOnce([task("a")]);
+      const old = deferred<Task[]>();
+      const latest = deferred<Task[]>();
+      fetchTasks.mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+      tracker.start("user-1");
+      await vi.advanceTimersByTimeAsync(1000);
+      const oldSignal = fetchTasks.mock.calls[0][1];
+      listTasks.mockResolvedValue([task("a", { status: "PROCESSING", currentStage: "GENERATE", updatedAt: later(1) })]);
+      await tracker.refresh();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fetchTasks).toHaveBeenCalledTimes(2);
+      expect(oldSignal?.aborted).toBe(true);
+      if (outcome === "success") old.resolve([task("a", { status: "PROCESSING", currentStage: "ASSET_CHECK", updatedAt: later(10) })]);
+      else old.reject(new ApiError(outcome === "401" ? 401 : 503, "OLD", "obsolete error"));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(tracker.getSnapshot().queryError).toBeNull();
+      expect(find("a")?.currentStage).toBe("GENERATE");
+      expect(fetchTasks).toHaveBeenCalledTimes(2);
+      expect(fetchTasks.mock.calls[1][1]?.aborted).toBe(false);
+      latest.resolve([task("a", { status: "SUCCEEDED", updatedAt: later(11) })]);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(find("a")?.status).toBe("SUCCEEDED");
+      expect(fetchTasks).toHaveBeenCalledTimes(2);
+    });
+
     it("没有未结束任务时不发起轮询", async () => {
       listTasks.mockResolvedValue([task("a", { status: "SUCCEEDED" })]);
       tracker.start("user-1");

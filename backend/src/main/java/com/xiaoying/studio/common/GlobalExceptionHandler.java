@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -34,7 +35,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(new ErrorBody("INVALID_ARGUMENT", message));
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestPartException.class})
+    @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestPartException.class,
+            MissingServletRequestParameterException.class})
     public ResponseEntity<ErrorBody> handleBadRequest(Exception e) {
         return ResponseEntity.badRequest().body(new ErrorBody("INVALID_ARGUMENT", "请求内容不完整或格式不正确"));
     }

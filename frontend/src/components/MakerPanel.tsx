@@ -38,10 +38,13 @@ export function MakerPanel({ template }: { template: Template }) {
     setSubmitting(true);
     setSubmitError(null);
     setNotice("");
+    const acceptTask = tracker.captureSubmission();
     try {
       const assetIds = slots.map((slot) => slot.assetId as string);
       const task = await api.createTask(template.id, assetIds);
-      tracker.add(task);
+      if (!acceptTask(task)) {
+        return;
+      }
       reset();
       setNotice("任务已提交，可以继续制作或离开页面");
     } catch (error) {

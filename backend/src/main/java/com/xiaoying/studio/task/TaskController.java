@@ -32,7 +32,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/tasks")
 public class TaskController {
 
-    private static final int HISTORY_LIMIT = 100;
     private static final int MAX_BATCH_IDS = 100;
 
     public record CreateTaskRequest(@NotBlank(message = "缺少模板") String templateId,
@@ -74,7 +73,7 @@ public class TaskController {
     @GetMapping
     public List<TaskResponse> list(HttpServletRequest request, @RequestParam(required = false) String templateId) {
         String userId = AuthInterceptor.currentUser(request).getId();
-        return taskMapper.findByUser(userId, templateId, HISTORY_LIMIT).stream().map(TaskResponse::of).toList();
+        return taskService.list(userId, templateId).stream().map(TaskResponse::of).toList();
     }
 
     /** 前端轮询使用：一次查询多个任务。不属于当前用户的 ID 会被忽略。 */
